@@ -1,4 +1,5 @@
 import { useState, useMemo, createContext, useContext } from "react";
+import { jsPDF } from "jspdf";
 
 const StudyCtx = createContext({ studyMode: false });
 const FONT = "Plus Jakarta Sans, sans-serif";
@@ -150,9 +151,9 @@ function NatureCard({ isES, exchanges, totals }) {
   const sugarPct  = totals.kcal > 0 ? Math.round(sugarKcal / totals.kcal * 100) : 0;
 
   const stats = [
-    { label: isES ? "Proteina animal"   : "Animal protein",  value: animalPct, sub: isES ? "del total proteico" : "of total protein", color:"#2563EB" },
-    { label: isES ? "Grasa vegetal"     : "Vegetable fat",   value: vegFatPct, sub: isES ? "del total lipidos"  : "of total lipids",  color:"#3A5BA0" },
-    { label: isES ? "Azucares simples"  : "Simple sugars",   value: sugarPct,  sub: isES ? "del VET"            : "of TDEE",          color: sugarPct === 0 ? "#22c55e" : "#A32D2D" },
+    { label: isES ? "Proteina animal"  : "Animal protein", value: animalPct, sub: isES ? "del total proteico" : "of total protein", color:"#2563EB" },
+    { label: isES ? "Grasa vegetal"    : "Vegetable fat",  value: vegFatPct, sub: isES ? "del total lipidos"  : "of total lipids",  color:"#3A5BA0" },
+    { label: isES ? "Azucares simples" : "Simple sugars",  value: sugarPct,  sub: isES ? "del VET"            : "of TDEE",          color: sugarPct === 0 ? "#22c55e" : "#A32D2D" },
   ];
 
   return (
@@ -269,6 +270,144 @@ export default function App() {
   const adecHC   = Math.round(totals.hc   / meta.hc   * 100);
   const vetMin   = patient.sex === "F" ? 1200 : 1500;
   const totalExchanges = Object.values(exchanges).reduce((sum, ex) => sum + ex.total, 0);
+
+  function exportPDF(studyModeOn) {
+    const doc = new jsPDF();
+    const isESLocal = lang === "ES";
+    const blue = [37, 99, 235];
+    const dark = [30, 45, 78];
+    const gray = [58, 91, 160];
+
+    // Header bar
+    doc.setFillColor(...dark);
+    doc.rect(0, 0, 210, 18, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.text("nutrionally learn", 14, 12);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(isESLocal ? "Plan de intercambios" : "Exchange plan", 70, 12);
+
+    // Patient info
+    doc.setTextColor(...dark);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text(patient.caseName || (isESLocal ? "Caso sin nombre" : "Unnamed case"), 14, 28);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...gray);
+    doc.text(
+      `VET ${(patient.vet||1582).toLocaleString()} kcal · ${patient.sex==="F" ? (isESLocal?"Femenino":"Female") : (isESLocal?"Masculino":"Male")} · ${patient.age||"—"} ${isESLocal?"años":"years"}`,
+      14, 35
+    );
+
+    // KPI cards
+    const kpis = [
+      { label: isESLocal?"Energia":"Energy",    value:`${totals.kcal} kcal` },
+      { label: isESLocal?"Proteinas":"Protein", value:`${totals.prot}g (${adecProt}%)` },
+      { label: isESLocal?"Lipidos":"Fat",       value:`${totals.lip}g (${adecLip}%)` },
+      { label: "HC",                            value:`${totals.hc}g (${adecHC}%)` },
+    ];
+    kpis.forEach((kpi, i) => {
+      const x = 14 + i * 47;
+      doc.setFillColor(239, 246, 255);
+      doc.roundedRect(x, 40, 44, 18, 2, 2, "F");
+      doc.setTextColor(...gray);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text(kpi.label, x + 4, 47);
+      doc.setTextColor(...dark);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text(kpi.value, x + 4, 54);
+    });
+
+    // Table header
+    let y = 68;
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...dark);
+    doc.text(isESLocal ? "Grupos de alimentos" : "Food groups", 14, y);
+    y += 6;
+    doc.setFillColor(245, 247, 255);
+    doc.rect(14, y, 182, 7, "F");
+    doc.setFontSize(7);
+    doc.setTextColor(...gray);
+    doc.setFont("helvetica", "normal");
+    const cols = [14, 100, 126, 146, 166];
+    const headers = [isESLocal?"Grupo":"Group", isESLocal?"Interc.":"Exch.", "Prot g", isESLocal?"Lip g":"Fat g", "HC g"];
+    headers.forEach((h, i) => doc.text(h, cols[i] + 2, y + 5));
+    y += 8;
+
+    // Table rows
+    (isESLocal ? GROUPS_ES : GROUPS_EN).forEach((group, idx) => {
+      const ev  = EXCH[group.key];
+      const qty = exchanges[group.key].total;
+      if (idx % 2 === 0) {
+        doc.setFillColor(249, 250, 255);
+        doc.rect(14, y - 1, 182, 7, "F");
+      }
+      doc.setTextColor(...dark);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text(group.label,         cols[0] + 2, y + 4);
+      doc.text(String(qty),         cols[1] + 8, y + 4, { align:"center" });
+      doc.text(String(qty*ev.prot), cols[2] + 8, y + 4, { align:"center" });
+      doc.text(String(qty*ev.lip),  cols[3] + 8, y + 4, { align:"center" });
+      doc.text(String(qty*ev.hc),   cols[4] + 8, y + 4, { align:"center" });
+      y += 7;
+    });
+
+    // Total row
+    doc.setFillColor(...blue);
+    doc.rect(14, y - 1, 182, 8, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("Total",              cols[0] + 2, y + 4);
+    doc.text(String(totals.prot),  cols[2] + 8, y + 4, { align:"center" });
+    doc.text(String(totals.lip),   cols[3] + 8, y + 4, { align:"center" });
+    doc.text(String(totals.hc),    cols[4] + 8, y + 4, { align:"center" });
+    y += 12;
+
+    // Meta row
+    doc.setFillColor(239, 246, 255);
+    doc.rect(14, y - 1, 182, 8, "F");
+    doc.setTextColor(...blue);
+    doc.setFont("helvetica", "normal");
+    doc.text(isESLocal ? "Meta" : "Goal",     cols[0] + 2, y + 4);
+    doc.text(String(Math.round(meta.prot)),   cols[2] + 8, y + 4, { align:"center" });
+    doc.text(String(Math.round(meta.lip)),    cols[3] + 8, y + 4, { align:"center" });
+    doc.text(String(Math.round(meta.hc)),     cols[4] + 8, y + 4, { align:"center" });
+    y += 12;
+
+    // Adequacy row
+    doc.setTextColor(...gray);
+    doc.setFontSize(7);
+    doc.text(`% ${isESLocal?"Adecuacion":"Adequacy"}:  Prot ${adecProt}%  |  ${isESLocal?"Lip":"Fat"} ${adecLip}%  |  HC ${adecHC}%`, 14, y);
+    y += 10;
+
+    // Study mode note
+    if (studyModeOn) {
+      doc.setFontSize(8);
+      doc.setTextColor(...gray);
+      doc.setFont("helvetica", "normal");
+      doc.text(
+        isESLocal
+          ? "Modo estudio: revisa las formulas de Harris-Benedict y los valores de intercambio antes de entregar."
+          : "Study mode: review Harris-Benedict formulas and exchange values before submitting.",
+        14, y, { maxWidth: 182 }
+      );
+    }
+
+    // Footer
+    doc.setFontSize(7);
+    doc.setTextColor(180, 180, 200);
+    doc.text(`nutrionally.com/learn · ${new Date().toLocaleDateString()}`, 14, 290);
+
+    doc.save(`nutrionally-learn-${patient.caseName || "caso"}.pdf`);
+  }
 
   const thStyle = { padding:"7px 12px", fontSize:10, fontWeight:500, color:"#3A5BA0", textTransform:"uppercase", letterSpacing:"0.05em", borderBottom:"0.5px solid #D4E3FF", fontFamily:FONT };
   const tdCenter = { padding:"8px 12px", textAlign:"center", fontFamily:FONT };
@@ -497,11 +636,13 @@ export default function App() {
               {/* PDF buttons */}
               <div style={{display:"flex", flexDirection:"column", gap:8}}>
                 <button
+                  onClick={() => exportPDF(false)}
                   style={{padding:"10px 0", borderRadius:8, background:"#EFF6FF", color:"#2563EB", fontSize:12, fontWeight:500, border:"0.5px solid #2563EB", cursor:"pointer", fontFamily:FONT}}
                 >
                   ↓ {isES ? "Descargar PDF" : "Download PDF"}
                 </button>
                 <button
+                  onClick={() => exportPDF(true)}
                   style={{padding:"10px 0", borderRadius:8, background: studyMode ? "#F3E8FF" : "#F5F7FF", color: studyMode ? "#7C3AED" : "#3A5BA0", fontSize:12, fontWeight:500, border: studyMode ? "0.5px solid #7C3AED" : "0.5px solid #D4E3FF", cursor:"pointer", fontFamily:FONT}}
                 >
                   {studyMode ? "◎ PDF Study" : "PDF"}
